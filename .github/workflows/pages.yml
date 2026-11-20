@@ -1,11 +1,12 @@
 name: עדכון מחירים ופרסום ל-GitHub Pages
 
+# עדכון אוטומטי (יומי ובכל שינוי) הושבת לבקשת בעל המאגר.
+# להרצה ידנית: Actions → "עדכון מחירים ופרסום ל-GitHub Pages" → Run workflow.
+# להחזרת העדכון היומי — להוסיף:
+#   schedule:
+#     - cron: "17 3 * * *"
 on:
-  push:
   workflow_dispatch:
-  schedule:
-    # כל יום ב-06:17 שעון ישראל (03:17 UTC), אחרי שהרשתות מפרסמות מחירונים מלאים
-    - cron: "17 3 * * *"
 
 permissions:
   contents: read
