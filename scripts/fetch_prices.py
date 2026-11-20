@@ -504,7 +504,7 @@ def main():
                         manu = (k.get("manufacturename") or k.get("manufacturername") or "").strip()
                         if manu in ("לא ידוע", "כללי", "unknown") or not re.search(r"\w", manu):
                             manu = ""
-                        info = [name, manu, qty, typ, cat_id(classify(name)), 1 if k.get("bisweighted") == "1" else 0]
+                        info = [name, manu, qty, typ, cat_id(classify(name, qty, typ)), 1 if k.get("bisweighted") == "1" else 0]
                         catalog[code] = info
                     codes.append(code)
                     prices.append(round(price, 2))

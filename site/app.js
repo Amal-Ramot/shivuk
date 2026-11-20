@@ -231,106 +231,32 @@
   }
 
   /* ---------- מציאת תחליף ----------
-   * מחפשים בכל מוצרי הסניף (לא רק באותה קטגוריה) מוצר עם אותה "מהות":
-   * מילות המהות = שם המוצר בלי מספרים, גדלים, אריזה, מותג ומילות שיווק.
-   * למשל "מלפפונים במלח 13-17 560 גרם" → [מלפפונים, במלח]. כל מוצר בסניף שיש בו
-   * "מלפפון" + "במלח" נחשב תחליף — בקופסה, בצנצנת, בשקית או בתפזורת.
+   * תחליף = כל מוצר בסניף מאותו סוג מוצר (מרכך כביסה, קטשופ, חלב…), בלי קשר למותג,
+   * לאריזה או לגודל. ממוינים לפי המחיר ל-100 גרם / 100 מ״ל / יחידה (כולל מבצעים),
+   * כך שהאריזה המשתלמת ביותר עולה ראשונה.
+   * סוג המוצר נקבע ב-scripts/categories.py לפי מילות מפתח בשם המוצר.
    */
-  // מילים שלא מתארות את המוצר עצמו: אריזה, גודל, שיווק, כשרות
-  const STOP = new Set(["של", "עם", "ללא", "גרם", "גר", "מל", "ליטר", "לי", "קג", "יח", "יחידות", "יחידה", "מארז", "אריזת",
-    "אריזה", "חדש", "חדשה", "אורגני", "אורגנית", "אורגניים", "טבעי", "טבעית", "מהדרינ", "מהדרין", "בדצ", "כשר", "לפסח", "למהדרינ",
-    "קלאסי", "מקורי", "מקורית", "איכות", "פרימיום", "גדול", "גדולה", "גדולימ", "גדולות", "קטנ", "קטנה", "קטנימ", "קטנות", "בינוני",
-    "בינונית", "בינונימ", "ענק", "מיני", "משפחתי", "משפחתית", "חסכונ", "חיסכונ", "מבצע", "שקית", "בשקית", "בקבוק", "בבקבוק", "פחית",
-    "בפחית", "קופסה", "בקופסה", "קופסת", "צנצנת", "בצנצנת", "מגש", "במגש", "ואקומ", "בואקומ", "שישיית", "רביעיית", "שלישיית", "זוג",
-    "ישראלי", "ישראלית", "מובחר", "מובחרימ", "סלקט", "טרי", "טריה", "טריימ", "טריות", "שומנ", "בתפזורת", "תפזורת", "ארוז", "ארוזה",
-    "שימורימ", "שימורי", "משומר", "משומרימ", "פרוס", "פרוסות", "נקודתי", "כולל", "פיקדונ", "פקדונ", "מעדנייה", "מעדניה",
-    "רמי", "לוי", "שופרסל", "שלי", "יוחננוף", "אושר", "עד", "טיב", "טעמ", "ויקטורי"]);
-  const FINALS = { "ך": "כ", "ם": "מ", "ן": "נ", "ף": "פ", "ץ": "צ" };
-  const unfinal = (s) => s.replace(/[ךםןףץ]/g, (c) => FINALS[c]);
-  const STOPN = new Set([...STOP].map(unfinal));
-  // מחזיר [{w: מילה מנורמלת, o: המילה המקורית}]
-  const wordsO = (s) => (s || "").replace(/[\d"'׳״.,()%*/+\-:#!?]+/g, " ").split(/\s+/)
-    .map((o) => ({ o, w: unfinal(o) })).filter((x) => x.w.length > 1 && !STOPN.has(x.w));
-  const words = (s) => wordsO(s).map((x) => x.w);
-  // "שורש" גס: 4 אותיות ראשונות (מלפפונים/מלפפון → מלפפ)
-  const stem = (w) => w.slice(0, 4);
-  // ב/ו/ה/ל בתחילת מילה ("במלח" ↔ "מלח")
-  const stemNoPrefix = (w) => (w.length > 3 && "בוהל".includes(w[0]) ? w.slice(1, 5) : null);
-  function coreWords(p) {
-    if (p._core) return p._core;
-    const brand = new Set(words(p.manu).map(stem));
-    const seen = new Set();
-    const core = wordsO(p.name).filter(({ w }) => {
-      const st = stem(w);
-      if (brand.has(st) || seen.has(st)) return false;
-      seen.add(st); return true;
-    });
-    p._core = core.map((x) => x.w);
-    p._coreText = core.slice(0, 3).map((x) => x.o).join(" ");
-    return p._core;
-  }
-  function tokenMatch(a, b) {
-    if (stem(a) === stem(b)) return true;
-    const a2 = stemNoPrefix(a), b2 = stemNoPrefix(b);
-    return (a2 && a2 === stem(b)) || (b2 && b2 === stem(a)) || (a2 && b2 && a2 === b2);
-  }
-  // האם q הוא אותו מוצר-מהות כמו p? מחזיר ציון 0..1 (0 = לא מתאים)
-  function substanceMatch(p, q) {
-    const A = coreWords(p), B = coreWords(q);
-    if (!A.length || !B.length) return 0;
-    // המילה הראשונה (שם המוצר עצמו, למשל "מלפפונים") חייבת להופיע בתחילת שם התחליף
-    if (!B.slice(0, 2).some((w) => tokenMatch(A[0], w))) return 0;
-    // ושאר מילות המהות ("במלח") — לפחות חצי מהן (שמות המוצרים בקבצים לפעמים קטועים)
-    const rest = A.slice(1, 4);
-    const hit = rest.filter((a) => B.some((b) => tokenMatch(a, b))).length;
-    if (hit < Math.ceil(rest.length / 2)) return 0;
-    return (1 + hit) / (1 + rest.length);
-  }
-
-  // אינדקס כל מוצרי הסניף (נטען פעם אחת לכל סניף)
-  let storeProducts = null;
-  async function allStoreProducts() {
-    if (storeProducts && storeProducts.data === state.storeData) return storeProducts.list;
-    const d = state.storeData;
-    const nums = [...new Set(d.k.map((k) => state.cats[k][1]))];
-    const map = new Map(await Promise.all(nums.map((n) => bucket(n).then((b) => [n, b]))));
-    const list = [];
-    for (let i = 0; i < d.c.length; i++) {
-      const info = map.get(state.cats[d.k[i]][1])[d.c[i]];
-      if (info) list.push(makeProduct(d.c[i], info, d.p[i], i));
-    }
-    storeProducts = { data: d, list };
-    return list;
-  }
-
   let altCache = [];
   async function findAlternatives() {
     const p = state.current; if (!p) return;
-    $("#findBtn").disabled = true;
-    $("#findBtn").textContent = "מחפש תחליפים בכל הסניף…";
-    try {
-      const all = await allStoreProducts();
-      const base = unitInfo(p, p.eff);
-      const out = [];
-      for (const q0 of all) {
-        if (q0.code === p.code) continue;
-        const sim = substanceMatch(p, q0);
-        if (!sim) continue;
-        const q = Object.assign({}, q0, { sim });
-        if (base) {
-          if (q.unit !== p.unit) continue;
-          const u = unitInfo(q, q.eff); if (!u) continue;
-          q.per = u.per; q.u = u;
-        }
-        q.ratio = p.qty && q.qty ? q.qty / p.qty : 1;
-        out.push(q);
+    const d = state.storeData;
+    const b = await bucket(state.cats[p.cat][1]);
+    const base = unitInfo(p, p.eff);
+    const out = [];
+    for (let i = 0; i < d.c.length; i++) {
+      if (d.k[i] !== p.cat || d.c[i] === p.code) continue;
+      const info = b[d.c[i]]; if (!info) continue;
+      const q = makeProduct(d.c[i], info, d.p[i], i);
+      if (base) {
+        if (q.unit !== p.unit) continue;
+        const u = unitInfo(q, q.eff); if (!u) continue;
+        q.per = u.per; q.u = u;
       }
-      altCache = out;
-      renderAlts();
-    } finally {
-      $("#findBtn").disabled = false;
-      $("#findBtn").textContent = "💡 מצא תחליף זול";
+      q.ratio = p.qty && q.qty ? q.qty / p.qty : 1;
+      out.push(q);
     }
+    altCache = out;
+    renderAlts();
   }
 
   function renderAlts() {
@@ -339,15 +265,14 @@
     const byUnit = state.sort === "unit" && base;
     let list = altCache.filter((q) => (byUnit ? q.per < base.per - 1e-9 : q.eff < p.eff - 1e-9));
     if (similarOnly) list = list.filter((q) => q.ratio >= 0.6 && q.ratio <= 1.7);
-    list.sort((a, b) => (byUnit ? a.per - b.per : a.eff - b.eff) || b.sim - a.sim);
+    list.sort((a, b) => (byUnit ? a.per - b.per : a.eff - b.eff) || b.qty - a.qty);
     list = list.slice(0, 25);
 
-    coreWords(p);
-    $("#altsTitle").textContent = `תחליפים זולים ל: ${p._coreText || p.name}`;
+    $("#altsTitle").textContent = `תחליפים זולים · ${catLabel(state.cats[p.cat][0])}`;
     $("#alts").hidden = false;
     if (!list.length) {
       $("#altList").innerHTML = `<li class="empty" style="display:block;cursor:default"><strong>👍 בחירה טובה!</strong>
-        לא נמצא בסניף מוצר דומה ${byUnit ? "ומשתלם" : "וזול"} יותר${similarOnly ? " בגודל דומה" : ""}.</li>`;
+        לא נמצא בסניף ${esc(catLabel(state.cats[p.cat][0]))} ${byUnit ? "משתלם" : "זול"} יותר${similarOnly ? " בגודל דומה" : ""}.</li>`;
     } else {
       $("#altList").innerHTML = list.map((q, i) => {
         const pct = byUnit ? (1 - q.per / base.per) * 100 : (1 - q.eff / p.eff) * 100;
@@ -439,7 +364,7 @@
   $("#altList").addEventListener("click", (e) => {
     const li = e.target.closest("li[data-code]"); if (!li) return;
     const q = altCache.find((x) => x.code === li.dataset.code);
-    if (q) { const { sim, per, u, ratio, _core, _coreText, ...prod } = q; showProduct(prod); }
+    if (q) { const { per, u, ratio, ...prod } = q; showProduct(prod); }
   });
   document.querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => {
     state.sort = b.dataset.sort;
