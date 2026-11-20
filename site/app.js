@@ -197,10 +197,21 @@
   }
 
   /* ---------- מציאת תחליף ---------- */
-  const STOP = new Set(["של", "עם", "ללא", "בטעם", "גרם", "גר", "מל", "ליטר", "קג", "יח", "מארז", "אריזת", "חדש"]);
-  const tokens = (s) => new Set(s.replace(/[\d"'׳״.,()%*/+\-]+/g, " ").split(/\s+/).filter((w) => w.length > 1 && !STOP.has(w)));
-  function similarity(a, b) {
-    const A = tokens(a), B = tokens(b);
+  // מילים כלליות שלא מעידות על סוג המוצר
+  const STOP = new Set(["של", "עם", "ללא", "בטעם", "טעם", "גרם", "גר", "מל", "ליטר", "קג", "יח", "יחידות", "מארז", "אריזת",
+    "אריזה", "חדש", "במלח", "בחומצ", "במים", "בשמנ", "אורגני", "אורגנית", "טבעי", "טבעית", "מהדרינ", "בדצ", "כשר", "לפסח",
+    "קלאסי", "לייט", "דיאט", "זירו", "מקורי", "איכות", "פרימיום", "גדול", "גדולה", "קטנ", "קטנה", "מבצע", "שקית", "בקבוק",
+    "פחית", "קופסה", "צנצנת", "מגש", "שישיית", "רביעיית", "זוג", "יחידה", "ישראלי", "מובחר", "סלקט", "פרוס", "פרוסות"]);
+  const FINALS = { "ך": "כ", "ם": "מ", "ן": "נ", "ף": "פ", "ץ": "צ" };
+  const words = (s) => s.replace(/[ךםןףץ]/g, (c) => FINALS[c])
+    .replace(/[\d"'׳״.,()%*/+\-:]+/g, " ").split(/\s+/).filter((w) => w.length > 1 && !STOP.has(w));
+  // "שורש" גס: 4 אותיות ראשונות (מלפפונ/מלפפונימ → מלפפ)
+  const stems = (s, manu) => {
+    const brand = new Set(words(manu || "").map((w) => w.slice(0, 4)));
+    return new Set(words(s).map((w) => w.slice(0, 4)).filter((w) => w.length > 1 && !brand.has(w)));
+  };
+  function similarity(p, q) {
+    const A = stems(p.name, p.manu), B = stems(q.name, q.manu);
     if (!A.size || !B.size) return 0;
     let n = 0; A.forEach((w) => { if (B.has(w)) n++; });
     return n / Math.min(A.size, B.size);
@@ -222,7 +233,7 @@
         const u = unitInfo(q); if (!u) continue;
         q.per = u.per; q.u = u;
       }
-      q.sim = similarity(p.name, q.name);
+      q.sim = similarity(p, q);
       q.ratio = p.qty && q.qty ? q.qty / p.qty : 1;
       out.push(q);
     }
@@ -233,9 +244,12 @@
   function renderAlts() {
     const p = state.current, base = unitInfo(p);
     const similarOnly = $("#similarSize").checked;
+    const wholeCat = $("#wholeCat").checked;
     const byUnit = state.sort === "unit" && base;
     let list = altCache.filter((q) => (byUnit ? q.per < base.per - 1e-9 : q.price < p.price));
     if (similarOnly) list = list.filter((q) => q.ratio >= 0.6 && q.ratio <= 1.7);
+    const hiddenOther = wholeCat ? 0 : list.filter((q) => q.sim === 0).length;
+    if (!wholeCat) list = list.filter((q) => q.sim > 0);
     list.sort((a, b) => (byUnit ? a.per - b.per : a.price - b.price) || b.sim - a.sim);
     list = list.slice(0, 25);
 
@@ -243,7 +257,8 @@
     $("#alts").hidden = false;
     if (!list.length) {
       $("#altList").innerHTML = `<li class="empty" style="display:block;cursor:default"><strong>👍 בחירה טובה!</strong>
-        לא נמצא בסניף מוצר ${byUnit ? "משתלם" : "זול"} יותר באותה קטגוריה${similarOnly ? " ובגודל דומה" : ""}.</li>`;
+        לא נמצא בסניף מוצר דומה ${byUnit ? "ומשתלם" : "וזול"} יותר${similarOnly ? " בגודל דומה" : ""}.
+        ${hiddenOther ? `<br><small>יש ${hiddenOther} מוצרים זולים יותר מסוג אחר בקטגוריה — סמנו "הצג את כל הקטגוריה".</small>` : ""}</li>`;
     } else {
       $("#altList").innerHTML = list.map((q, i) => {
         const pct = byUnit ? (1 - q.per / base.per) * 100 : (1 - q.price / p.price) * 100;
@@ -340,6 +355,7 @@
     renderAlts();
   }));
   $("#similarSize").addEventListener("change", renderAlts);
+  $("#wholeCat").addEventListener("change", renderAlts);
 
   init();
 })();
