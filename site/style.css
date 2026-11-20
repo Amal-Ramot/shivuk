@@ -10,6 +10,8 @@
   --good: #15803d;
   --good-soft: #e5f5ea;
   --warn: #b45309;
+  --promo: #c2410c;
+  --promo-soft: #fff4ec;
   --shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 16px rgba(0,0,0,.05);
   --radius: 14px;
 }
@@ -26,6 +28,8 @@
     --good: #4ade80;
     --good-soft: #143222;
     --warn: #fbbf24;
+    --promo: #fb923c;
+    --promo-soft: #2b1d12;
     --shadow: none;
   }
 }
@@ -160,3 +164,18 @@ h3 { font-size: 17px; margin: 0; }
 .empty strong { display: block; color: var(--good); font-size: 17px; margin-bottom: 4px; }
 
 .foot { display: flex; flex-direction: column; gap: 2px; align-items: center; text-align: center; padding: 18px 16px 26px; font-size: 12.5px; color: var(--muted); }
+
+.promos { display: grid; gap: 8px; margin: 0 0 14px; }
+.promo { border: 1px dashed var(--promo); background: var(--promo-soft); border-radius: 12px; padding: 10px 12px; }
+.promo-cond { border-color: var(--line); background: var(--bg); }
+.promo-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.promo-top b { font-size: 17px; color: var(--promo); }
+.promo-cond .promo-top b { color: var(--text); }
+.promo-tag { font-size: 13px; font-weight: 700; color: var(--promo); }
+.promo-cond .promo-tag { color: var(--muted); }
+.promo-desc { font-size: 13px; color: var(--muted); margin-top: 2px; }
+.alt-promo { font-size: 12.5px; color: var(--promo); font-weight: 500; margin-top: 2px; }
+.alt-old { font-size: 12.5px; color: var(--muted); text-decoration: line-through; text-align: left; }
+.promo-cond-note { font-size: 13px; font-weight: 500; color: var(--warn); margin-top: 3px; }
+.promo-foot { font-size: 12px; color: var(--muted); }
+.alt-cond { color: var(--muted); font-weight: 400; }

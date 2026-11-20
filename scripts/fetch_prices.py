@@ -9,7 +9,7 @@
        stores.json            — רשימת כל הסניפים
        cats.json              — רשימת הקטגוריות ולאיזה קובץ קטלוג כל אחת שייכת
        catalog/bNN.json       — פרטי מוצרים (שם, יצרן, כמות, יחידה, קטגוריה) מחולקים לפי קטגוריה
-       store/<id>.json        — מחירי סניף אחד: ברקודים, מחירים, אינדקס קטגוריה
+       store/<id>.json        — מחירי סניף אחד: ברקודים, מחירים, אינדקס קטגוריה ומבצעים בתוקף
        meta.json              — זמן עדכון וסטטוס כל רשת
 
 שימוש:
@@ -234,13 +234,13 @@ def norm_code(code, chain_key):
 
 # ---------------------------------------------------------------- Chain fetchers
 
-def latest_price_files(names):
-    """מתוך רשימת קבצים מחזיר {storeId: name} — המחירון המלא העדכני של כל סניף."""
+def latest_price_files(names, prefix="PriceFull"):
+    """מתוך רשימת קבצים מחזיר {storeId: name} — הקובץ המלא העדכני של כל סניף (מחירון או מבצעים)."""
     best = {}
     for n in names:
-        m = re.match(r"PriceFull(\d+)-(\d+)-(\d+)-(\d{8})-?(\d{4,6})?", n, re.I)
+        m = re.match(prefix + r"(\d+)-(\d+)-(\d+)-(\d{8})-?(\d{4,6})?", n, re.I)
         if not m:
-            m2 = re.match(r"PriceFull(\d+)-(\d+)-(\d{8})(\d{4})?", n, re.I)
+            m2 = re.match(prefix + r"(\d+)-(\d+)-(\d{8})(\d{4})?", n, re.I)
             if not m2:
                 continue
             sid, stamp = int(m2.group(2)), m2.group(3) + (m2.group(4) or "")
@@ -281,9 +281,15 @@ class Shufersal:
         return parse_stores(parse_xml(fetch(self.op, urls[0])))
 
     def price_files(self):
-        urls = self._list(2)
+        return self._files(2, "PriceFull")
+
+    def promo_files(self):
+        return self._files(4, "PromoFull")
+
+    def _files(self, cat, prefix):
+        urls = self._list(cat)
         by_name = {self._fname(u): u for u in urls}
-        return {sid: by_name[n] for sid, n in latest_price_files(by_name).items()}
+        return {sid: by_name[n] for sid, n in latest_price_files(by_name, prefix).items()}
 
     def download(self, ref):
         return fetch(self.op, ref)
@@ -329,8 +335,75 @@ class Cerberus:
             self._login()
         return latest_price_files(self.files)
 
+    def promo_files(self):
+        if self.files is None:
+            self._login()
+        return latest_price_files(self.files, "PromoFull")
+
     def download(self, ref):
         return fetch(self.op, self.BASE + "/file/d/" + urllib.parse.quote(ref))
+
+
+# ---------------------------------------------------------------- Promotions
+
+def parse_dt(s):
+    s = (s or "").strip().replace("T", " ")
+    for fmt, n in (("%Y-%m-%d %H:%M:%S", 19), ("%Y-%m-%d %H:%M", 16), ("%Y-%m-%d", 10)):
+        try:
+            return dt.datetime.strptime(s[:n], fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def parse_promos(root, chain_key, now):
+    """מחזיר {code: [(תיאור, מחיר ליחידה במבצע, כמות מינימלית, סוג, תאריך סיום, סכום קנייה מינימלי)]}.
+    סוג: 0 = לכל הלקוחות, 1 = לחברי מועדון, 2 = מותנה בסכום קנייה.
+
+    "2ב20" מופיע בקבצים כ-MinQty=2, DiscountedPrice=20 (מחיר כולל), ולכן מחיר ליחידה = 20/2.
+    מדלגים על קופונים ועל מתנות (מחיר 0).
+    """
+    out = {}
+    for pr in root.iter():
+        if pr.tag.lower() != "promotion":
+            continue
+        top = kids(pr)
+        if top.get("additionaliscoupon") == "1":
+            continue
+        start, end = parse_dt(top.get("promotionstartdatetime") or top.get("promotionstartdate")), \
+            parse_dt(top.get("promotionenddatetime") or top.get("promotionenddate"))
+        if end and end.hour == 0 and end.minute == 0 and len((top.get("promotionenddatetime") or top.get("promotionenddate") or "")) <= 10:
+            end = end.replace(hour=23, minute=59)
+        if (start and start > now) or (end and end < now):
+            continue
+        desc = re.sub(r"\s+", " ", top.get("promotiondescription", "")).strip()
+        if not desc:
+            continue
+        club = top.get("clubid", "0").strip()
+        is_club = 0 if (not club or club.startswith("0")) else 1
+        cond_m = re.search(r"(?:מעל|מינימום קני(?:י)?ה(?: של)?)\s*₪?\s*(\d+(?:\.\d+)?)", desc)
+        desc_cond = to_float(cond_m.group(1)) if cond_m else 0.0
+        end_s = end.strftime("%Y-%m-%d") if end and end.year < 2030 else ""
+        groups = [g for g in pr.iter() if g.tag.lower() == "group"] or [pr]
+        for g in groups:
+            gk = kids(g)
+            # מבצע מותנה בסכום קנייה מינימלי — נשמר עם סוג 2 וסכום התנאי
+            cond = to_float(gk.get("minpurchaseamount") or top.get("minpurchaseamnt")) or desc_cond
+            kind = 2 if cond > 0 and not is_club else is_club
+            for it in g.iter():
+                if it.tag.lower() not in ("promotionitem", "item"):
+                    continue
+                ik = kids(it)
+                code = norm_code(ik.get("itemcode"), chain_key)
+                if not code:
+                    continue
+                get = lambda f: ik.get(f) if ik.get(f) not in (None, "") else (gk.get(f) or top.get(f))  # noqa: E731
+                qty = to_float(get("minqty")) or 1.0
+                total = to_float(get("discountedprice"))
+                if total <= 0 or qty <= 0 or qty > 50:
+                    continue
+                out.setdefault(code, []).append((desc, round(total / qty, 2), qty, kind, end_s, round(cond)))
+    return out
 
 
 # ---------------------------------------------------------------- Build
@@ -364,6 +437,8 @@ def main():
         chains = [c for c in chains if c.key in wanted]
 
     cities = load_cities()
+    # זמן ישראל, כדי לבדוק אילו מבצעים בתוקף היום
+    now = dt.datetime.now(dt.timezone(dt.timedelta(hours=2))).replace(tzinfo=None)
     catalog = {}          # code -> [name, manufacturer, qty, unitType, catKey]
     cat_index = {}        # catKey -> idx
     stores_out = []
@@ -379,6 +454,11 @@ def main():
         try:
             stores = ch.stores()
             files = ch.price_files()
+            try:
+                promo_files = ch.promo_files()
+            except Exception as e:  # noqa: BLE001
+                print(f"[{ch.key}] promos unavailable: {e}", file=sys.stderr)
+                promo_files = {}
         except Exception as e:  # noqa: BLE001
             print(f"[{ch.key}] skipped: {e}", file=sys.stderr)
             meta["chains"].append({"key": ch.key, "name": ch.name, "ok": False, "error": str(e)[:200]})
@@ -389,14 +469,20 @@ def main():
         print(f"[{ch.key}] {len(stores)} stores in list, {len(files)} price files, processing {len(sids)}", file=sys.stderr)
 
         def work(sid):
-            return sid, ch.download(files[sid])
+            promo = None
+            if sid in promo_files:
+                try:
+                    promo = ch.download(promo_files[sid])
+                except Exception as e:  # noqa: BLE001
+                    print(f"[{ch.key}] promo {sid} failed: {e}", file=sys.stderr)
+            return sid, ch.download(files[sid]), promo
 
-        n_ok = 0
+        n_ok = n_promo = 0
         with cf.ThreadPoolExecutor(WORKERS) as ex:
             futs = [ex.submit(work, s) for s in sids]
             for fut in cf.as_completed(futs):
                 try:
-                    sid, raw = fut.result()
+                    sid, raw, promo_raw = fut.result()
                     root = parse_xml(raw)
                 except Exception as e:  # noqa: BLE001
                     print(f"[{ch.key}] store failed: {e}", file=sys.stderr)
@@ -425,6 +511,27 @@ def main():
                     cats.append(info[4])
                 if not codes:
                     continue
+                # מבצעים: לכל מוצר שומרים את המבצע הכי משתלם מכל סוג (כללי / מועדון / מותנה)
+                pm, px, pm_index = [], {}, {}
+                if promo_raw:
+                    try:
+                        promos = parse_promos(parse_xml(promo_raw), ch.key, now)
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[{ch.key}] promo {sid} parse failed: {e}", file=sys.stderr)
+                        promos = {}
+                    for i, code in enumerate(codes):
+                        best = {}
+                        for pr in promos.get(code, ()):
+                            if not (0.1 * prices[i] <= pr[1] < prices[i] - 0.004):
+                                continue  # מחיר מבצע לא סביר או לא זול מהמחיר הרגיל
+                            if pr[3] not in best or pr[1] < best[pr[3]][1]:
+                                best[pr[3]] = pr
+                        for pr in best.values():
+                            if pr not in pm_index:
+                                pm_index[pr] = len(pm)
+                                pm.append(list(pr))
+                            px.setdefault(str(i), []).append(pm_index[pr])
+                    n_promo += len(px)
                 st = stores.get(sid, {})
                 store_id = f"{ch.key}-{sid}"
                 city = st.get("city", "")
@@ -432,12 +539,12 @@ def main():
                 if city.isdigit():
                     city = ""
                 with open(os.path.join(out, "store", store_id + ".json"), "w", encoding="utf-8") as f:
-                    json.dump({"c": codes, "p": prices, "k": cats}, f, ensure_ascii=False, separators=(",", ":"))
+                    json.dump({"c": codes, "p": prices, "k": cats, "pm": pm, "px": px}, f, ensure_ascii=False, separators=(",", ":"))
                 stores_out.append({"id": store_id, "chain": ch.key, "chainName": ch.name,
                                    "name": st.get("name") or f"סניף {sid}", "sub": st.get("sub", ""),
                                    "address": st.get("address", ""), "city": city, "n": len(codes)})
                 n_ok += 1
-        meta["chains"].append({"key": ch.key, "name": ch.name, "ok": n_ok > 0, "stores": n_ok,
+        meta["chains"].append({"key": ch.key, "name": ch.name, "ok": n_ok > 0, "stores": n_ok, "promoItems": n_promo,
                                "seconds": round(time.time() - t0)})
         print(f"[{ch.key}] done: {n_ok} stores in {time.time() - t0:.0f}s, catalog={len(catalog)}", file=sys.stderr)
 

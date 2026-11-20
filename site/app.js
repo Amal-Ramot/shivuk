@@ -31,9 +31,9 @@
   };
 
   /* ---------- יחידות ---------- */
-  function unitInfo(p) {
+  function unitInfo(p, price = p.price) {
     // מחזיר {per, label} — מחיר להשוואה וטקסט תצוגה
-    const { qty, unit, price, weighted } = p;
+    const { qty, unit, weighted } = p;
     if (!qty || !unit) return null;
     if (unit === "g") return { per: (price / qty) * 100, label: "ל-100 גרם", size: weighted ? "לק״ג" : fmtSize(qty, "g") };
     if (unit === "ml") return { per: (price / qty) * 100, label: "ל-100 מ״ל", size: fmtSize(qty, "ml") };
@@ -141,12 +141,38 @@
     const b = await bucket(state.cats[k][1]);
     const info = b[code];
     if (!info) return null;
-    return makeProduct(code, info, d.p[i]);
+    return makeProduct(code, info, d.p[i], i);
   }
 
-  function makeProduct(code, info, price) {
+  // מבצעים בתוקף למוצר: {desc, each (מחיר ליחידה במבצע), qty (כמות מינימלית), kind (0 כללי / 1 מועדון / 2 מותנה), end}
+  function promosAt(i) {
+    const d = state.storeData;
+    const ids = d.px && d.px[i];
+    if (!ids) return [];
+    return ids.map((j) => { const [desc, each, qty, kind, end, cond] = d.pm[j]; return { desc, each, qty, kind, end, cond: cond || 0 }; })
+      .sort((a, b) => a.kind - b.kind || a.each - b.each);
+  }
+
+  function makeProduct(code, info, price, i) {
     const [name, manu, qty, unit, cat, weighted] = info;
-    return { code, name, manu, qty, unit, cat, weighted: !!weighted, price };
+    const promos = promosAt(i);
+    // המחיר האפקטיבי להשוואה: המחיר הרגיל או מחיר מבצע שפתוח לכל הלקוחות, הנמוך מביניהם
+    const open = promos.filter((x) => x.kind === 0);
+    const eff = Math.min(price, ...open.map((x) => x.each));
+    return { code, name, manu, qty, unit, cat, weighted: !!weighted, price, promos, eff, onSale: eff < price };
+  }
+
+  const KIND = ["", "למועדון", "בתנאי"];
+  // הסבר על התנאי של מבצע מותנה / מועדון
+  function condText(x) {
+    if (x.kind === 1) return "⚠️ בתנאי: לחברי מועדון הרשת / למשלמים בכרטיס האשראי של הרשת" + (x.cond ? ` ובקנייה מעל ₪${x.cond}` : "");
+    if (x.kind === 2) return x.cond ? `⚠️ בתנאי: קנייה בסכום של ₪${x.cond} לפחות בחשבונית` : "⚠️ בתנאי: מבצע מותנה — ראו פירוט בתיאור";
+    return "";
+  }
+  const fmtDate = (s) => (s ? s.slice(8, 10) + "/" + s.slice(5, 7) : "");
+  function promoText(x) {
+    const deal = x.qty > 1 ? `${trim(x.qty)} ב-${money(x.each * x.qty)} (${money(x.each)} ליח׳)` : `${money(x.each)}`;
+    return deal;
   }
 
   /* ---------- חיפוש מוצר ---------- */
@@ -180,6 +206,15 @@
     state.current = p;
     const u = unitInfo(p);
     const meta = [p.manu, u && u.size].filter(Boolean).join(" · ");
+    const promoHtml = p.promos.length ? `<div class="promos">${p.promos.map((x) => `
+        <div class="promo ${x.kind ? "promo-cond" : ""}">
+          <div class="promo-top"><span class="promo-tag">🏷️ מבצע${x.kind ? " " + KIND[x.kind] : ""}</span>
+            <b>${promoText(x)}</b></div>
+          ${x.kind ? `<div class="promo-cond-note">${esc(condText(x))}</div>` : ""}
+          <div class="promo-desc">${esc(x.desc)}${x.end ? ` · עד ${fmtDate(x.end)}` : ""}</div>
+        </div>`).join("")}
+        ${p.promos.some((x) => x.kind) ? `<div class="promo-foot">מבצעים בתנאי מוצגים לידיעה. ההשוואה לתחליפים נעשית לפי מבצעים שפתוחים לכל הלקוחות.</div>` : ""}
+      </div>` : "";
     $("#product").innerHTML = `
       <span class="cat">${esc(catLabel(state.cats[p.cat][0]))}</span>
       <h2>${esc(p.name)}</h2>
@@ -188,6 +223,7 @@
         <div class="price">${p.price.toFixed(2)} <small>₪${p.weighted ? " לק״ג" : ""}</small></div>
         ${u && !p.weighted ? `<div class="unit">${money(u.per)} ${u.label}</div>` : ""}
       </div>
+      ${promoHtml}
       <button id="findBtn" class="btn btn-good">💡 מצא תחליף זול</button>
       <div class="code">${esc(p.code.replace(/^\w+:/, ""))}</div>`;
     $("#product").hidden = false;
@@ -222,15 +258,15 @@
     const p = state.current; if (!p) return;
     const d = state.storeData;
     const b = await bucket(state.cats[p.cat][1]);
-    const base = unitInfo(p);
+    const base = unitInfo(p, p.eff);
     const out = [];
     for (let i = 0; i < d.c.length; i++) {
       if (d.k[i] !== p.cat || d.c[i] === p.code) continue;
       const info = b[d.c[i]]; if (!info) continue;
-      const q = makeProduct(d.c[i], info, d.p[i]);
+      const q = makeProduct(d.c[i], info, d.p[i], i);
       if (base) {
         if (q.unit !== p.unit) continue;
-        const u = unitInfo(q); if (!u) continue;
+        const u = unitInfo(q, q.eff); if (!u) continue;
         q.per = u.per; q.u = u;
       }
       q.sim = similarity(p, q);
@@ -242,13 +278,13 @@
   }
 
   function renderAlts() {
-    const p = state.current, base = unitInfo(p);
+    const p = state.current, base = unitInfo(p, p.eff);
     const similarOnly = $("#similarSize").checked;
     const byUnit = state.sort === "unit" && base;
-    let list = altCache.filter((q) => (byUnit ? q.per < base.per - 1e-9 : q.price < p.price));
+    let list = altCache.filter((q) => (byUnit ? q.per < base.per - 1e-9 : q.eff < p.eff - 1e-9));
     if (similarOnly) list = list.filter((q) => q.ratio >= 0.6 && q.ratio <= 1.7);
     list = list.filter((q) => q.sim > 0); // רק מוצרים מאותו סוג
-    list.sort((a, b) => (byUnit ? a.per - b.per : a.price - b.price) || b.sim - a.sim);
+    list.sort((a, b) => (byUnit ? a.per - b.per : a.eff - b.eff) || b.sim - a.sim);
     list = list.slice(0, 25);
 
     $("#altsTitle").textContent = `תחליפים זולים · ${catLabel(state.cats[p.cat][0])}`;
@@ -258,12 +294,15 @@
         לא נמצא בסניף מוצר דומה ${byUnit ? "ומשתלם" : "וזול"} יותר${similarOnly ? " בגודל דומה" : ""}.</li>`;
     } else {
       $("#altList").innerHTML = list.map((q, i) => {
-        const pct = byUnit ? (1 - q.per / base.per) * 100 : (1 - q.price / p.price) * 100;
+        const pct = byUnit ? (1 - q.per / base.per) * 100 : (1 - q.eff / p.eff) * 100;
+        const sale = q.onSale ? q.promos.find((x) => x.kind === 0 && x.each === q.eff) : null;
         const sub = [q.manu, q.u && q.u.size, q.u && !q.weighted ? `${money(q.per)} ${q.u.label}` : ""].filter(Boolean).join(" · ");
         return `<li data-code="${esc(q.code)}" class="${i === 0 ? "best" : ""}">
           <div>${i === 0 ? `<div class="badge-best">★ ${byUnit ? "הכי משתלם" : "הכי זול"}</div>` : ""}
-            <div class="alt-name">${esc(q.name)}</div><div class="alt-sub">${esc(sub)}</div></div>
-          <div><div class="alt-price">${money(q.price)}</div>
+            <div class="alt-name">${esc(q.name)}</div><div class="alt-sub">${esc(sub)}</div>
+            ${sale ? `<div class="alt-promo">🏷️ מבצע: ${promoText(sale)}</div>` : ""}
+            ${q.promos.filter((x) => x.kind).slice(0, 1).map((x) => `<div class="alt-promo alt-cond">🏷️ ${promoText(x)} · ${esc(condText(x).replace("⚠️ ", ""))}</div>`).join("")}</div>
+          <div>${q.onSale ? `<div class="alt-old">${money(q.price)}</div>` : ""}<div class="alt-price">${money(q.eff)}</div>
             <div class="save">חוסך ${Math.round(pct)}%${byUnit ? " ליחידה" : ""}</div></div>
         </li>`;
       }).join("");
@@ -294,7 +333,7 @@
     const terms = q.split(/\s+/);
     const res = idx.filter((x) => terms.every((t) => (x.name + " " + x.manu).includes(t))).slice(0, 30);
     $("#nameResults").innerHTML = res.length
-      ? res.map((x) => `<li><button data-i="${x.i}"><span>${esc(x.name)}</span><b>${money(state.storeData.p[x.i])}</b></button></li>`).join("")
+      ? res.map((x) => `<li><button data-i="${x.i}"><span>${esc(x.name)}${state.storeData.px && state.storeData.px[x.i] ? " 🏷️" : ""}</span><b>${money(state.storeData.p[x.i])}</b></button></li>`).join("")
       : `<li class="muted">לא נמצאו מוצרים.</li>`;
   }
 
