@@ -24,13 +24,51 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # המחירים נשמרים בזיכרון מטמון ומשמשים שוב בשינויים באתר עצמו
+      - name: שחזור נתוני המחירים האחרונים
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: site/data
+          key: price-data-${{ github.run_id }}
+          restore-keys: price-data-
+
+      # הורדה מלאה רק בעדכון היומי, בהרצה ידנית, כששונה קוד עיבוד הנתונים, או כשאין נתונים שמורים
+      - name: האם צריך להוריד מחירים מחדש?
+        id: need
+        run: |
+          fetch=false
+          if [ "${{ github.event_name }}" != "push" ]; then fetch=true; fi
+          if [ ! -f site/data/meta.json ]; then fetch=true; fi
+          before="${{ github.event.before }}"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            if ! git cat-file -e "$before" 2>/dev/null || [ -n "$(git diff --name-only "$before" "${{ github.sha }}" -- scripts/)" ]; then
+              fetch=true
+            fi
+          fi
+          echo "fetch=$fetch" >> "$GITHUB_OUTPUT"
+          echo "fetch=$fetch"
 
       - uses: actions/setup-python@v5
+        if: steps.need.outputs.fetch == 'true'
         with:
           python-version: "3.12"
 
       - name: הורדת מחירונים מהרשתות ובניית נתונים
-        run: python scripts/fetch_prices.py --out site/data
+        if: steps.need.outputs.fetch == 'true'
+        run: |
+          rm -rf site/data
+          python scripts/fetch_prices.py --out site/data
+
+      - name: שמירת נתוני המחירים לשימוש חוזר
+        if: steps.need.outputs.fetch == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: site/data
+          key: price-data-${{ github.run_id }}
 
       - name: סיכום
         run: |
