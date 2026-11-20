@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f766e">
+<title>סורק מחירים</title>
+<meta name="description" content="סריקת מוצר בסניף, הצגת המחיר ומציאת תחליף זול ומשתלם יותר מאותה קטגוריה — לפי נתוני שקיפות המחירים של רשתות השיווק.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9B%92%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">🛒</span>
+    <div>
+      <h1>סורק מחירים</h1>
+      <p class="tag">סורקים מוצר · רואים מחיר · מוצאים תחליף זול</p>
+    </div>
+  </div>
+  <button id="storeBtn" class="store-pill" hidden>
+    <span class="dot"></span><span id="storeBtnText"></span>
+  </button>
+</header>
+
+<main>
+  <!-- בחירת סניף -->
+  <section id="viewStores" class="view">
+    <h2>באיזה סניף אתם?</h2>
+    <div class="chips" id="chainChips" role="tablist" aria-label="רשת"></div>
+    <input id="storeSearch" class="input" type="search" placeholder="חיפוש לפי עיר, שם סניף או כתובת…" autocomplete="off">
+    <ul id="storeList" class="store-list" aria-live="polite"></ul>
+    <p id="storeEmpty" class="muted center" hidden>לא נמצאו סניפים.</p>
+  </section>
+
+  <!-- סריקה -->
+  <section id="viewScan" class="view" hidden>
+    <div class="scan-box">
+      <div id="reader" class="reader" hidden></div>
+      <button id="scanBtn" class="btn btn-primary btn-big">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V4h3M21 7V4h-3M3 17v3h3M21 17v3h-3M7 8v8M10 8v8M13 8v8M17 8v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        סריקת ברקוד
+      </button>
+      <button id="stopBtn" class="btn btn-ghost" hidden>סגירת מצלמה</button>
+    </div>
+
+    <form id="manualForm" class="row">
+      <input id="manualCode" class="input" inputmode="numeric" pattern="[0-9]*" placeholder="או הקלידו ברקוד" autocomplete="off">
+      <button class="btn">חפש</button>
+    </form>
+
+    <details id="nameSearchBox" class="name-search">
+      <summary>חיפוש לפי שם מוצר</summary>
+      <input id="nameSearch" class="input" type="search" placeholder="למשל: חלב 3%, במבה, טונה…" autocomplete="off">
+      <ul id="nameResults" class="results"></ul>
+    </details>
+
+    <div id="status" class="status" role="status" aria-live="polite"></div>
+
+    <article id="product" class="card product" hidden></article>
+
+    <section id="alts" hidden>
+      <div class="alts-head">
+        <h3 id="altsTitle">תחליפים זולים</h3>
+        <div class="seg" role="group" aria-label="מיון">
+          <button data-sort="unit" class="on">הכי משתלם</button>
+          <button data-sort="price">הכי זול</button>
+        </div>
+      </div>
+      <label class="check"><input type="checkbox" id="similarSize"> רק בגודל דומה</label>
+      <ul id="altList" class="alt-list"></ul>
+    </section>
+  </section>
+</main>
+
+<footer class="foot">
+  <span id="metaInfo">נתונים מקבצי שקיפות המחירים של רשתות השיווק.</span>
+  <span class="muted">המחירים הם מחירי מדף ואינם כוללים מבצעים.</span>
+</footer>
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
