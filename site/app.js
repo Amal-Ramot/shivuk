@@ -244,12 +244,10 @@
   function renderAlts() {
     const p = state.current, base = unitInfo(p);
     const similarOnly = $("#similarSize").checked;
-    const wholeCat = $("#wholeCat").checked;
     const byUnit = state.sort === "unit" && base;
     let list = altCache.filter((q) => (byUnit ? q.per < base.per - 1e-9 : q.price < p.price));
     if (similarOnly) list = list.filter((q) => q.ratio >= 0.6 && q.ratio <= 1.7);
-    const hiddenOther = wholeCat ? 0 : list.filter((q) => q.sim === 0).length;
-    if (!wholeCat) list = list.filter((q) => q.sim > 0);
+    list = list.filter((q) => q.sim > 0); // רק מוצרים מאותו סוג
     list.sort((a, b) => (byUnit ? a.per - b.per : a.price - b.price) || b.sim - a.sim);
     list = list.slice(0, 25);
 
@@ -257,8 +255,7 @@
     $("#alts").hidden = false;
     if (!list.length) {
       $("#altList").innerHTML = `<li class="empty" style="display:block;cursor:default"><strong>👍 בחירה טובה!</strong>
-        לא נמצא בסניף מוצר דומה ${byUnit ? "ומשתלם" : "וזול"} יותר${similarOnly ? " בגודל דומה" : ""}.
-        ${hiddenOther ? `<br><small>יש ${hiddenOther} מוצרים זולים יותר מסוג אחר בקטגוריה — סמנו "הצג את כל הקטגוריה".</small>` : ""}</li>`;
+        לא נמצא בסניף מוצר דומה ${byUnit ? "ומשתלם" : "וזול"} יותר${similarOnly ? " בגודל דומה" : ""}.</li>`;
     } else {
       $("#altList").innerHTML = list.map((q, i) => {
         const pct = byUnit ? (1 - q.per / base.per) * 100 : (1 - q.price / p.price) * 100;
@@ -355,7 +352,6 @@
     renderAlts();
   }));
   $("#similarSize").addEventListener("change", renderAlts);
-  $("#wholeCat").addEventListener("change", renderAlts);
 
   init();
 })();
