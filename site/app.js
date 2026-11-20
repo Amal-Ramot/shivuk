@@ -156,9 +156,8 @@
   function makeProduct(code, info, price, i) {
     const [name, manu, qty, unit, cat, weighted] = info;
     const promos = promosAt(i);
-    // המחיר האפקטיבי להשוואה: המחיר הרגיל או מחיר מבצע שפתוח לכל הלקוחות, הנמוך מביניהם
-    const open = promos.filter((x) => x.kind === 0);
-    const eff = Math.min(price, ...open.map((x) => x.each));
+    // המחיר האפקטיבי להשוואה: המחיר הרגיל או מחיר המבצע (כולל מבצעים בתנאי), הנמוך מביניהם
+    const eff = Math.min(price, ...promos.map((x) => x.each));
     return { code, name, manu, qty, unit, cat, weighted: !!weighted, price, promos, eff, onSale: eff < price };
   }
 
@@ -213,7 +212,6 @@
           ${x.kind ? `<div class="promo-cond-note">${esc(condText(x))}</div>` : ""}
           <div class="promo-desc">${esc(x.desc)}${x.end ? ` · עד ${fmtDate(x.end)}` : ""}</div>
         </div>`).join("")}
-        ${p.promos.some((x) => x.kind) ? `<div class="promo-foot">מבצעים בתנאי מוצגים לידיעה. ההשוואה לתחליפים נעשית לפי מבצעים שפתוחים לכל הלקוחות.</div>` : ""}
       </div>` : "";
     $("#product").innerHTML = `
       <span class="cat">${esc(catLabel(state.cats[p.cat][0]))}</span>
@@ -295,13 +293,13 @@
     } else {
       $("#altList").innerHTML = list.map((q, i) => {
         const pct = byUnit ? (1 - q.per / base.per) * 100 : (1 - q.eff / p.eff) * 100;
-        const sale = q.onSale ? q.promos.find((x) => x.kind === 0 && x.each === q.eff) : null;
+        const sale = q.onSale ? q.promos.find((x) => x.each === q.eff) : null;
         const sub = [q.manu, q.u && q.u.size, q.u && !q.weighted ? `${money(q.per)} ${q.u.label}` : ""].filter(Boolean).join(" · ");
         return `<li data-code="${esc(q.code)}" class="${i === 0 ? "best" : ""}">
           <div>${i === 0 ? `<div class="badge-best">★ ${byUnit ? "הכי משתלם" : "הכי זול"}</div>` : ""}
             <div class="alt-name">${esc(q.name)}</div><div class="alt-sub">${esc(sub)}</div>
             ${sale ? `<div class="alt-promo">🏷️ מבצע: ${promoText(sale)}</div>` : ""}
-            ${q.promos.filter((x) => x.kind).slice(0, 1).map((x) => `<div class="alt-promo alt-cond">🏷️ ${promoText(x)} · ${esc(condText(x).replace("⚠️ ", ""))}</div>`).join("")}</div>
+            ${sale && sale.kind ? `<div class="promo-cond-note">${esc(condText(sale))}</div>` : ""}</div>
           <div>${q.onSale ? `<div class="alt-old">${money(q.price)}</div>` : ""}<div class="alt-price">${money(q.eff)}</div>
             <div class="save">חוסך ${Math.round(pct)}%${byUnit ? " ליחידה" : ""}</div></div>
         </li>`;
