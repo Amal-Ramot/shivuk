@@ -237,16 +237,56 @@
    * סוג המוצר נקבע ב-scripts/categories.py לפי מילות מפתח בשם המוצר.
    */
   let altCache = [];
+  /* טעם: בתוך אותו סוג מוצר, התחליף חייב להיות באותו טעם.
+   * "צ'יפס בטעם שמנת ובצל" → רק צ'יפס שמנת ובצל. מוצר רגיל (בלי טעם) → רק מוצרים רגילים. */
+  const FLAVORS = ["שמנת", "בצל", "גריל", "ברביקיו", "פיצה", "חריף", "צ'ילי", "פפריקה", "שום", "מלח", "פלפל", "חומץ", "גבינה",
+    "עגבניות", "טבעי", "תות", "וניל", "שוקולד", "מריר", "לבן", "בננה", "אפרסק", "לימון", "ליים", "נענע", "ענבים", "תפוח", "תפוז",
+    "אבטיח", "מנגו", "פסיפלורה", "אננס", "קוקוס", "דובדבן", "פירות יער", "פטל", "אוכמניות", "רימון", "קפה", "קרמל", "טופי",
+    "נוגט", "אגוזים", "לוז", "בוטנים", "שקדים", "פיסטוק", "דבש", "קינמון", "חלבה", "ריבה", "תירס", "שמיר", "זעתר", "טריאקי",
+    "חמאה", "מוקה", "קפוצ'ינו", "עוגיות", "במילוי", "מילוי", "ממולא"];
+  const FLAV_N = FLAVORS.map((f) => f.replace(/[ךםןףץ]/g, (c) => ({ "ך": "כ", "ם": "מ", "ן": "נ", "ף": "פ", "ץ": "צ" }[c])));
+  function flavorsOf(name) {
+    const n = " " + (name || "").replace(/[ךםןףץ]/g, (c) => ({ "ך": "כ", "ם": "מ", "ן": "נ", "ף": "פ", "ץ": "צ" }[c]))
+      .replace(/[\d"'׳״.,()%*/+\-:]+/g, (m) => (m === "'" ? m : " ")) + " ";
+    const set = new Set();
+    FLAV_N.forEach((f, i) => {
+      // המילה עצמה או עם ו/ב בתחילתה ("ובצל", "בשמנת")
+      if (new RegExp(`[\\sוב]${f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(n)) set.add(FLAVORS[i]);
+    });
+    return set;
+  }
+  const SPECIAL = ["במילוי", "מילוי", "ממולא", "שוקולד", "נוגט", "תות", "וניל", "בננה", "קרמל"];
+  // common = טעמים שמופיעים ברוב המוצרים מהסוג הזה (למשל "גבינה" בגבינה צהובה) — אלה לא טעם אלא חלק מהסוג
+  function sameFlavor(p, qFlav, qName, common) {
+    const A = [...p._flav].filter((f) => !common.has(f));
+    const B = [...qFlav].filter((f) => !common.has(f));
+    if (!A.length) return !B.some((f) => SPECIAL.includes(f)) && !/בטעם/.test(qName);
+    return A.every((f) => qFlav.has(f));
+  }
+
   async function findAlternatives() {
     const p = state.current; if (!p) return;
     const d = state.storeData;
     const b = await bucket(state.cats[p.cat][1]);
     const base = unitInfo(p, p.eff);
-    const out = [];
+    p._flav = flavorsOf(p.name);
+    // כל המוצרים מאותו סוג בסניף + הטעמים שלהם
+    const same = [];
+    const freq = new Map();
     for (let i = 0; i < d.c.length; i++) {
-      if (d.k[i] !== p.cat || d.c[i] === p.code) continue;
+      if (d.k[i] !== p.cat) continue;
       const info = b[d.c[i]]; if (!info) continue;
+      const fl = flavorsOf(info[0]);
+      fl.forEach((f) => freq.set(f, (freq.get(f) || 0) + 1));
+      same.push([i, info, fl]);
+    }
+    const common = new Set([...freq].filter(([, n]) => same.length >= 4 && n / same.length > 0.5).map(([f]) => f));
+    p._common = common;
+    const out = [];
+    for (const [i, info, fl] of same) {
+      if (d.c[i] === p.code) continue;
       const q = makeProduct(d.c[i], info, d.p[i], i);
+      if (!sameFlavor(p, fl, q.name, common)) continue;
       if (base) {
         if (q.unit !== p.unit) continue;
         const u = unitInfo(q, q.eff); if (!u) continue;
@@ -268,7 +308,8 @@
     list.sort((a, b) => (byUnit ? a.per - b.per : a.eff - b.eff) || b.qty - a.qty);
     list = list.slice(0, 25);
 
-    $("#altsTitle").textContent = `תחליפים זולים · ${catLabel(state.cats[p.cat][0])}`;
+    const fl = [...(p._flav || [])].filter((f) => !["במילוי", "מילוי", "ממולא"].includes(f) && !(p._common && p._common.has(f)));
+    $("#altsTitle").textContent = `תחליפים זולים · ${catLabel(state.cats[p.cat][0])}${fl.length ? " בטעם " + fl.join(" ו") : ""}`;
     $("#alts").hidden = false;
     if (!list.length) {
       $("#altList").innerHTML = `<li class="empty" style="display:block;cursor:default"><strong>👍 בחירה טובה!</strong>
@@ -364,7 +405,7 @@
   $("#altList").addEventListener("click", (e) => {
     const li = e.target.closest("li[data-code]"); if (!li) return;
     const q = altCache.find((x) => x.code === li.dataset.code);
-    if (q) { const { per, u, ratio, ...prod } = q; showProduct(prod); }
+    if (q) { const { per, u, ratio, _flav, _common, ...prod } = q; showProduct(prod); }
   });
   document.querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => {
     state.sort = b.dataset.sort;
